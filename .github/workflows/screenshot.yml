@@ -1,0 +1,69 @@
+name: Screenshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "撮影するURL（https://... 形式）"
+        required: true
+        type: string
+      width:
+        description: "ビューポート幅"
+        required: false
+        default: "1280"
+        type: string
+      height:
+        description: "ビューポート高さ"
+        required: false
+        default: "800"
+        type: string
+      full_page:
+        description: "ページ全体を撮影する"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright and fonts
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk   # 日本語の文字化け防止
+
+      - name: Validate URL
+        env:
+          INPUT_URL: ${{ inputs.url }}
+        run: |
+          case "$INPUT_URL" in
+            http://*|https://*) echo "URL OK: $INPUT_URL" ;;
+            *) echo "::error::http:// または https:// で始まるURLを指定してください"; exit 1 ;;
+          esac
+
+      - name: Take screenshot
+        env:
+          TARGET_URL: ${{ inputs.url }}
+          VIEW_WIDTH: ${{ inputs.width }}
+          VIEW_HEIGHT: ${{ inputs.height }}
+          FULL_PAGE: ${{ inputs.full_page }}
+        run: python scripts/screenshot.py
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-${{ github.run_number }}
+          path: screenshots/*.png
+          retention-days: 30
