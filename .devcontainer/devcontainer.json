@@ -1,0 +1,10 @@
+{
+  "name": "remote-browser",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "hostRequirements": { "cpus": 2 },
+  "forwardPorts": [6080],
+  "portsAttributes": {
+    "6080": { "label": "Browser", "visibility": "private", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh"
+}
