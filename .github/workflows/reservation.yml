@@ -1,0 +1,93 @@
+name: Reservation Click Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "対象URL（https://... 形式）"
+        required: true
+        type: string
+      interval_seconds:
+        description: "クリック間隔（秒、既定600=10分）"
+        required: false
+        default: "600"
+        type: string
+      max_duration_seconds:
+        description: "最大実行時間（秒、既定21000=5時間50分）"
+        required: false
+        default: "21000"
+        type: string
+
+# 後続の Actions を自分で起動するため actions: write が必要
+permissions:
+  contents: read
+  actions: write
+
+# 同じボットの実行が重ならないようにする
+concurrency:
+  group: resv-bot
+  cancel-in-progress: false
+
+jobs:
+  click-loop:
+    runs-on: ubuntu-latest
+    # GitHub Actions のジョブ上限は6時間。上限より手前（5時間50分）でスクリプトが終了し、
+    # その後に次回を起動するのでタイムアウトに引っかからない
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright and fonts
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk   # 日本語の文字化け防止
+
+      # 停止スイッチ: リポジトリ変数 BOT_STOP を true にすると連鎖が止まる
+      - name: Check stop flag
+        id: stopcheck
+        run: |
+          if [ "${{ vars.BOT_STOP }}" = "true" ]; then
+            echo "stopped=true" >> "$GITHUB_OUTPUT"
+            echo "リポジトリ変数 BOT_STOP=true のため、今回で終了します"
+          else
+            echo "stopped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run click loop (5時間50分間、10分ごとにクリック)
+        if: steps.stopcheck.outputs.stopped != 'true'
+        env:
+          TARGET_URL: ${{ inputs.url }}
+          INTERVAL_SECONDS: ${{ inputs.interval_seconds }}
+          MAX_DURATION_SECONDS: ${{ inputs.max_duration_seconds }}
+        run: python scripts/resv_bot.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resv-screenshots-${{ github.run_number }}
+          path: screenshots/*.png
+          retention-days: 30
+
+      # 次の Actions に操作を引き継ぐ（URLと設定をそのまま渡して再起動）
+      - name: Dispatch next run
+        if: steps.stopcheck.outputs.stopped != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_URL: ${{ inputs.url }}
+          INTERVAL_SECONDS: ${{ inputs.interval_seconds }}
+          MAX_DURATION_SECONDS: ${{ inputs.max_duration_seconds }}
+        run: |
+          gh workflow run reservation.yml \
+            --ref "${{ github.ref_name }}" \
+            -f url="$TARGET_URL" \
+            -f interval_seconds="$INTERVAL_SECONDS" \
+            -f max_duration_seconds="$MAX_DURATION_SECONDS"
+          echo "次のワークフロー実行を起動しました（セッションは引き継がれず新規アクセスになります）"
